@@ -1,69 +1,83 @@
-#!/usr/bin/env bash
-# immudb_setup.sh
-# Build immudb v1.10.0 locally and copy binaries to $HOME/bin
-set -euo pipefail
+#!/bin/bash
+set -e
+# Build immudb binaries inside Alpine (proot-distro) and check versions
 
-# Requirements: git, make, go, clang (installed via universal-pm.sh)
-BIN_DIR="$HOME/bin"
-SRC_DIR="$HOME/immudb-src"
-IMMUD_REPO="https://github.com/codenotary/immudb.git"
-IMMUD_TAG="v1.10.0"
+echo "[*] Updating Alpine packages..."
+apk update && apk upgrade
 
-mkdir -p "$BIN_DIR"
-
-# Load package manager helper if available
-if [ -f "$HOME/.universal-pm.sh" ]; then
-  # shellcheck source=/dev/null
-  source "$HOME/.universal-pm.sh"
-else
-  echo "[!] ~/.universal-pm.sh not found; continuing without auto-install."
-fi
-
-echo "[*] Ensure build dependencies are installed (you may be prompted for sudo)."
-if command -v sysinstall >/dev/null 2>&1; then
-  sysinstall git make golang clang cmake
-else
-  echo "[!] sysinstall not available; ensure git, make, go, clang, cmake are installed."
-fi
+echo "[*] Installing build dependencies..."
+apk add --no-cache git make clang cmake go libc-dev bash
 
 echo "[*] Verifying toolchain versions..."
-git --version || true
-make --version || true
-go version || true
-clang --version || true
+git --version
+make --version
+clang --version
+go version
 
-# Clone or update source
-if [ -d "$SRC_DIR" ]; then
-  echo "[*] Updating immudb source in $SRC_DIR"
-  git -C "$SRC_DIR" fetch --all --tags || true
-  git -C "$SRC_DIR" checkout "$IMMUD_TAG" || git -C "$SRC_DIR" pull --ff-only || true
-else
-  echo "[*] Cloning immudb $IMMUD_TAG to $SRC_DIR"
-  git clone --depth 1 --branch "$IMMUD_TAG" "$IMMUD_REPO" "$SRC_DIR"
+mkdir -p "$HOME/bin"
+
+# Clone immudb if not already present
+if [ ! -d "$HOME/immudb" ]; then
+  echo "[*] Cloning immudb source..."
+  git clone --depth=1 --branch v1.10.0 https://github.com/codenotary/immudb.git "$HOME/immudb"
 fi
 
-cd "$SRC_DIR"
+cd "$HOME/immudb"
 
-# Build only if binaries missing or older
-need_build=false
-for b in immudb immuclient immuadmin; do
-  if [ ! -x "$BIN_DIR/$b" ]; then
-    need_build=true
-    break
-  fi
-done
-
-if [ "$need_build" = true ]; then
+# Build binaries only if missing
+if [ ! -f "$HOME/bin/immudb" ] || [ ! -f "$HOME/bin/immuclient" ] || [ ! -f "$HOME/bin/immuadmin" ]; then
   echo "[*] Building immudb binaries..."
   make immudb immuclient immuadmin
-  cp -f immudb immuclient immuadmin "$BIN_DIR/"
-  chmod +x "$BIN_DIR"/immudb "$BIN_DIR"/immuclient "$BIN_DIR"/immuadmin
+  cp immudb immuclient immuadmin "$HOME/bin/"
 else
-  echo "[*] Binaries already present in $BIN_DIR; skipping build."
+  echo "[*] Binaries already present, skipping rebuild."
 fi
 
-echo "[*] immudb version checks:"
-"$BIN_DIR/immudb" version || true
-"$BIN_DIR/immuclient" version || true
-"$BIN_DIR/immuadmin" version || true
-echo "[*] immudb build/install complete."
+echo "[*] Checking immudb binary versions..."
+"$HOME/bin/immudb" version || true
+"$HOME/bin/immuclient" version || true
+"$HOME/bin/immuadmin" version || true
+
+echo "[*] Build and version check complete."
+localhost:~# cat s.sh
+#!/bin/bash
+set -e
+# Build immudb binaries inside Alpine (proot-distro) and check versions
+
+echo "[*] Updating Alpine packages..."
+apk update && apk upgrade
+
+echo "[*] Installing build dependencies..."
+apk add --no-cache git make clang cmake go libc-dev bash
+
+echo "[*] Verifying toolchain versions..."
+git --version
+make --version
+clang --version
+go version
+
+mkdir -p "$HOME/bin"
+
+# Clone immudb if not already present
+if [ ! -d "$HOME/immudb" ]; then
+  echo "[*] Cloning immudb source..."
+  git clone --depth=1 --branch v1.10.0 https://github.com/codenotary/immudb.git "$HOME/immudb"
+fi
+
+cd "$HOME/immudb"
+
+# Build binaries only if missing
+if [ ! -f "$HOME/bin/immudb" ] || [ ! -f "$HOME/bin/immuclient" ] || [ ! -f "$HOME/bin/immuadmin" ]; then
+  echo "[*] Building immudb binaries..."
+  make immudb immuclient immuadmin
+  cp immudb immuclient immuadmin "$HOME/bin/"
+else
+  echo "[*] Binaries already present, skipping rebuild."
+fi
+
+echo "[*] Checking immudb binary versions..."
+"$HOME/bin/immudb" version || true
+"$HOME/bin/immuclient" version || true
+"$HOME/bin/immuadmin" version || true
+
+echo "[*] Build and version check complete."
