@@ -1,91 +1,117 @@
-#!/usr/bin/env bash
-# immudb-setup-operator-db.sh
-# Start immudb (if needed), login as superadmin, create DB and operator user, test immuclient.
-set -euo pipefail
+#!/bin/bash
+set -e
+# immudb-setup-operator.sh — immudb Operator Database Setup
+# Starts immudb, logs in as superadmin, creates the operator
+# database and user, tests the connection, and writes the
+# credentials to ~/.identity/db_secrets.env.
+#
+# Run ONCE after immudb_setup.sh. Idempotent — re-running will
+# skip creation if the database and user already exist.
 
 BIN_DIR="${BIN_DIR:-$HOME/bin}"
 IMMUD_BIN="$BIN_DIR/immudb"
 IMMUADMIN="$BIN_DIR/immuadmin"
 IMMUCLIENT="$BIN_DIR/immuclient"
-DATA_DIR="${DATA_DIR:-$HOME/immudb-data}"
-LOG_FILE="$DATA_DIR/immudb.log"
 
-mkdir -p "$DATA_DIR"
+DATA_DIR="${DATA_DIR:-$HOME/.orp_vault/data}"
+LOG_FILE="$HOME/.orp_vault/immudb.log"
 
-# Check binaries
+mkdir -p "$DATA_DIR" "$(dirname "$LOG_FILE")"
+
+echo "[*] Verifying immudb binaries..."
 for cmd in "$IMMUD_BIN" "$IMMUADMIN" "$IMMUCLIENT"; do
-  if [ ! -x "$cmd" ]; then
-    echo "ERROR: required binary not found or not executable: $cmd"
-    echo "Place immudb, immuadmin, immuclient in $BIN_DIR and re-run."
-    exit 1
-  fi
+    if [ ! -x "$cmd" ]; then
+        echo "ERROR: Binary not found: $cmd"
+        echo "Run immudb_setup.sh first."
+        exit 1
+    fi
+    echo "Found: $cmd"
 done
 
-# Start immudb if not running
-if ! pgrep -x immudb >/dev/null 2>&1; then
-  echo "[*] immudb server not running, starting it..."
-  nohup "$IMMUD_BIN" --dir "$DATA_DIR" > "$LOG_FILE" 2>&1 &
-  sleep 4
+echo "[*] Starting immudb server if not running..."
+if pgrep -x immudb >/dev/null 2>&1; then
+    echo "immudb is already running."
+else
+    nohup "$IMMUD_BIN" \
+        --dir "$DATA_DIR" \
+        --address 127.0.0.1 \
+        --port 3322 \
+        --auth=true \
+        --maintenance=false \
+        >> "$LOG_FILE" 2>&1 &
+    echo "Waiting for immudb to accept connections..."
+    TRIES=0
+    while ! "$IMMUCLIENT" status >/dev/null 2>&1; do
+        sleep 0.5
+        TRIES=$((TRIES + 1))
+        [ $TRIES -ge 30 ] && {
+            echo "ERROR: immudb did not start after 15s. Check: $LOG_FILE"
+            exit 1
+        }
+    done
+    echo "immudb is ready."
 fi
 
-# Wait until immudb responds (timeout ~15s)
-echo "[*] Waiting for immudb to accept connections..."
-TRIES=0
-until "$IMMUCLIENT" status >/dev/null 2>&1 || [ $TRIES -ge 15 ]; do
-  sleep 1
-  TRIES=$((TRIES + 1))
-done
-
-if ! "$IMMUCLIENT" status >/dev/null 2>&1; then
-  echo "ERROR: immudb did not start or is not responding. Check $LOG_FILE"
-  exit 2
-fi
-
-# Superadmin login (interactive)
-echo "🔑 Login as superadmin (user: immudb)"
+echo "[*] Logging in as superadmin..."
 if ! "$IMMUADMIN" login immudb; then
-  echo "ERROR: superadmin login failed"
-  exit 3
+    echo "ERROR: Superadmin login failed."
+    exit 1
 fi
+echo "Superadmin login successful."
 
-# Database creation (prompt with default)
+echo "[*] Database creation..."
 read -r -p "Enter new database name [brgy_bunaodb]: " IMMUDBDB
 IMMUDBDB="${IMMUDBDB:-brgy_bunaodb}"
 
-if "$IMMUADMIN" database list | awk '{print $1}' | grep -qw "^$IMMUDBDB$"; then
-  echo "[*] Database '$IMMUDBDB' already exists, skipping create."
+if "$IMMUADMIN" database list 2>/dev/null | awk '{print $1}' | grep -qw "^${IMMUDBDB}$"; then
+    echo "Database '${IMMUDBDB}' already exists — skipping creation."
 else
-  echo "[*] Creating database '$IMMUDBDB'..."
-  "$IMMUADMIN" database create "$IMMUDBDB"
+    "$IMMUADMIN" database create "$IMMUDBDB"
+    echo "Database '${IMMUDBDB}' created."
 fi
 
-# User creation (prompt with default)
-read -r -p "Enter new username [orp_operator]: " IMMUDBUSER
+echo "[*] Operator user creation..."
+read -r -p "Enter operator username [orp_operator]: " IMMUDBUSER
 IMMUDBUSER="${IMMUDBUSER:-orp_operator}"
-read -r -p "Enter role (read, readwrite, admin) [readwrite]: " IMMUDBROLE
-IMMUDBROLE="${IMMUDBROLE:-readwrite}"
 
-if "$IMMUADMIN" user list | awk '{print $1}' | grep -qw "^$IMMUDBUSER$"; then
-  echo "[*] User '$IMMUDBUSER' already exists. Skipping creation."
+if "$IMMUADMIN" user list 2>/dev/null | awk '{print $1}' | grep -qw "^${IMMUDBUSER}$"; then
+    echo "User '${IMMUDBUSER}' already exists — skipping creation."
+    echo "To reset the password: ~/bin/immuadmin user changepassword ${IMMUDBUSER}"
 else
-  echo "[*] Creating user '$IMMUDBUSER' with role '$IMMUDBROLE' on database '$IMMUDBDB'..."
-  "$IMMUADMIN" user create "$IMMUDBUSER" "$IMMUDBROLE" "$IMMUDBDB"
+    "$IMMUADMIN" user create "$IMMUDBUSER" readwrite "$IMMUDBDB"
+    echo "User '${IMMUDBUSER}' created with readwrite access."
 fi
 
-# Verify user exists
-echo "[*] Verifying user..."
-"$IMMUADMIN" user list | grep -E "^$IMMUDBUSER\b" || echo "⚠️ User not found in list"
-
-# Test immuclient login and sample set/get/delete
-echo "🔑 Testing immuclient login as $IMMUDBUSER on $IMMUDBDB"
+echo "[*] Testing operator login..."
 if "$IMMUCLIENT" login "$IMMUDBUSER" --database "$IMMUDBDB"; then
-  echo "[*] immuclient logged in as $IMMUDBUSER"
-  "$IMMUCLIENT" set __orp_test_key "ok" >/dev/null 2>&1 || true
-  "$IMMUCLIENT" get __orp_test_key || true
-  "$IMMUCLIENT" delete __orp_test_key >/dev/null 2>&1 || true
-  echo "[*] immuclient test complete"
+    "$IMMUCLIENT" set __orp_healthcheck__ "ok" >/dev/null 2>&1 || true
+    "$IMMUCLIENT" get __orp_healthcheck__ >/dev/null 2>&1 || true
+    echo "Read/write test passed."
 else
-  echo "⚠️ immuclient login failed for $IMMUDBUSER"
+    echo "Login verification failed — check the password you entered."
 fi
 
-echo "✅ immudb operator DB setup finished."
+echo "[*] Writing credentials file..."
+SECRETS_FILE="$HOME/.identity/db_secrets.env"
+mkdir -p "$HOME/.identity"
+chmod 700 "$HOME/.identity"
+
+cat > "$SECRETS_FILE" <<EOF
+# db_secrets.env — ORP immudb Operator Credentials
+# Generated by immudb-setup-operator.sh on $(date)
+# SECURITY NOTES:
+#   - chmod 600 (owner read/write only).
+#   - Do NOT commit this file to git.
+#   - Operator PASSWORD is not stored here.
+
+IMMUDB_USER="$IMMUDBUSER"
+IMMUDB_DB="$IMMUDBDB"
+EOF
+
+chmod 600 "$SECRETS_FILE"
+echo "Credentials written to: $SECRETS_FILE"
+
+echo "[*] Setup complete."
+echo "Database: $IMMUDBDB"
+echo "Username: $IMMUDBUSER"
+echo "Secrets:  $SECRETS_FILE"
