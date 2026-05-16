@@ -1,23 +1,66 @@
-# requirements.txt — ORP Engine dependencies
-# Install via: pip install -r requirements.txt
-# Or run: ./python_prep.sh
+# requirements.in — ORP Engine Python Dependencies
+# ─────────────────────────────────────────────────────────────────
+# Pin top-level dependencies here. python_prep.sh runs pip-compile
+# --generate-hashes to produce the locked, auditable requirements.txt.
+#
+# SYSTEM DEPENDENCY — must be installed before `pip install`:
+#   python-magic requires libmagic1 at the OS level.
+#   python_prep.sh installs it automatically via apt.
+#   Manual install: sudo apt-get install libmagic1
+#
+# To regenerate requirements.txt after editing this file:
+#   ./.venv/bin/pip-compile --generate-hashes requirements.in \
+#       --output-file requirements.txt
+# ─────────────────────────────────────────────────────────────────
+
+# ── Bootstrap ────────────────────────────────────────────────────
+# Pre-seeded so requirements.in is self-contained in git.
+# python_prep.sh will update these pins to match the venv versions.
+pip==25.1.1
+setuptools==80.7.1
+wheel==0.45.1
+
+# ── WSGI server ──────────────────────────────────────────────────
+gunicorn==25.3.0
 
 # ── Web framework ────────────────────────────────────────────────
-flask>=3.0.0
+Flask==3.1.3
+Flask-WTF==1.3.0
+Flask-Limiter==4.1.1
 
 # ── PDF processing ───────────────────────────────────────────────
-pypdf>=4.0.0
-reportlab>=4.0.0
+pypdf==6.10.2
+reportlab==4.4.10
 
 # ── QR code generation ───────────────────────────────────────────
-qrcode[pil]>=7.4.0
+qrcode==8.2
+Pillow==12.2.0
 
 # ── Cryptography ─────────────────────────────────────────────────
-python-gnupg>=0.5.0
+python-gnupg==0.5.6
+
+# ── File type detection ──────────────────────────────────────────
+# Requires OS package: sudo apt-get install libmagic1
+# python_prep.sh installs this automatically.
+python-magic==0.4.27
 
 # ── Immutable database client ────────────────────────────────────
-immudb-py>=1.4.0
+immudb-py==1.5.0
 
 # ── Environment & timezone ───────────────────────────────────────
-python-dotenv>=1.0.0
-pytz>=2024.1
+python-dotenv==1.2.2
+pytz==2026.1.post1
+
+# ── Observability ────────────────────────────────────────────────
+python-json-logger==4.1.0
+
+# ── Security hardening ───────────────────────────────────────────
+# (Flask-WTF and Flask-Limiter are listed above with the framework)
+
+# ── Testing (dev-only) ───────────────────────────────────────────
+pytest==9.0.3
+pytest-cov==7.1.0
+pytest-mock==3.15.1
+
+# ── Security scanning (dev-only) ─────────────────────────────────
+pip-audit==2.10.0
